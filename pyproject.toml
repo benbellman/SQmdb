@@ -19,7 +19,7 @@ dependencies = [
 test = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
-include = ["sqmdb*"]
+include = ["sqmdb*", "examples*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
