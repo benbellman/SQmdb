@@ -129,8 +129,12 @@ For a small extract (for example, 1–5 matches), keep database-specific SQL and
 connection settings outside SQmdb. The helper in `examples/local_validation.py`
 converts an executed DB-API cursor—including a `pyodbc` cursor—to a Polars
 `DataFrame`; it reads in batches but concatenates the selected rows in memory.
-Run the example from the repository root. Install `pyodbc` separately only if
-your local driver needs it. Do not commit connection strings or credentials.
+From the repository root, install SQmdb in the Python environment used to run
+the example with `python -m pip install -e .`. The `examples` helper is included
+in the install, so `examples.local_validation` can also be imported outside the
+repository root. In Positron, select this same Python environment. Install
+`pyodbc` separately only if your local driver needs it. Do not commit
+connection strings or credentials.
 
 Alias selected source columns in SQL to the canonical names, filter to the
 chosen matches, and preserve row order:
