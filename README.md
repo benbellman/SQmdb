@@ -123,6 +123,90 @@ values = pitch_value(test_tracking, pitch_value_model, config)
 quality = space_quality(influence, values)
 ```
 
+## Local database smoke test
+
+For a small extract (for example, 1–5 matches), keep database-specific SQL and
+connection settings outside SQmdb. The helper in `examples/local_validation.py`
+converts an executed DB-API cursor—including a `pyodbc` cursor—to a Polars
+`DataFrame`; it reads in batches but concatenates the selected rows in memory.
+Run the example from the repository root. Install `pyodbc` separately only if
+your local driver needs it. Do not commit connection strings or credentials.
+
+Alias selected source columns in SQL to the canonical names, filter to the
+chosen matches, and preserve row order:
+
+```python
+import os
+import pyodbc
+
+from examples.local_validation import cursor_to_polars
+from sqmdb import PassHorizonModel, SQConfig, fit_player_movement_model, iter_player_influence
+
+connection = pyodbc.connect(os.environ["SQMDB_CONNECTION_STRING"])
+try:
+    tracking_cursor = connection.cursor()
+    tracking_cursor.execute(
+        """
+        SELECT source_match_id AS match_id,
+               source_frame AS frame_id,
+               source_player_id AS player_id,
+               source_team_id AS team_id,
+               player_x_metres AS x, player_y_metres AS y,
+               ball_x_metres AS ball_x, ball_y_metres AS ball_y
+        FROM your_tracking_source
+        WHERE source_match_id IN (?, ?)
+        ORDER BY source_match_id, source_frame, source_player_id
+        """,
+        *match_ids,
+    )
+    tracking = cursor_to_polars(tracking_cursor)
+
+    pass_cursor = connection.cursor()
+    pass_cursor.execute(
+        """
+        SELECT completed_pass_distance_metres AS pass_distance_m,
+               pass_travel_seconds AS pass_duration_seconds
+        FROM your_completed_pass_source
+        WHERE source_match_id IN (?, ?)
+        """,
+        *match_ids,
+    )
+    passes = cursor_to_polars(pass_cursor)
+finally:
+    connection.close()
+
+config = SQConfig(frame_rate=25.0, grid_resolution_m=2.0)
+movement = fit_player_movement_model(tracking, config, sample_stride=5)
+horizons = PassHorizonModel.fit(passes)
+for batch in iter_player_influence(
+    tracking, movement, config, horizon_model=horizons, frame_stride=25
+):
+    print(batch.head())
+```
+
+Replace the illustrative source names and aliases with your schema; provide
+`match_ids` as a tuple with one value per placeholder. Tracking coordinates
+must be in metres with the pitch centered at `(0, 0)` and attack oriented toward
+positive x. The returned tracking rows must be unique by match, frame, and
+player; frame IDs must be integer-like, sampled consistently, grouped by match,
+and ordered by frame. Set `frame_rate` and `frame_stride` to your feed's rate
+(the example values assume 25 Hz). Include `ball_x` and `ball_y` in every frame
+when using the pass horizon model.
+
+The pass query must return completed-pass records with `pass_distance_m` in
+metres and `pass_duration_seconds` as elapsed time from pass release to
+reception, both finite and non-null. In the paper, pass distance is the
+Euclidean separation between passer and intended receiver at pass initiation;
+it is not the ball's path length. Reception is identified using a 1.5 m
+ball-to-receiver proximity heuristic. At least 10 passes with two or more
+distinct distances are required by `PassHorizonModel.fit`, and durations must
+be positive. If reliable completed-pass times are unavailable, skip pass
+fitting and supply a fixed `horizon_seconds` to `iter_player_influence`
+instead. A one-to-five-match run is a useful integration smoke test; sparse
+movement bins may require more tracking or a lower `movement_min_samples`
+setting, which makes the fitted densities less reliable. A smoke test is not
+by itself evidence of model generalization.
+
 `iter_player_influence` and `iter_pitch_value` yield long-form Polars
 DataFrames containing `match_id`, `frame_id`, `grid_i`, `grid_j`, grid
 coordinates, and their respective values; player influence also contains
