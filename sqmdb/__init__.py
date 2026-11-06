@@ -16,6 +16,7 @@ from .pitch_value import (
     pitch_value,
 )
 from .space_quality import space_quality
+from .visualization import plot_pitch_surfaces
 
 __all__ = [
     "PlayerMovementModel",
@@ -29,5 +30,6 @@ __all__ = [
     "iter_player_influence",
     "pitch_value",
     "player_influence",
+    "plot_pitch_surfaces",
     "space_quality",
 ]

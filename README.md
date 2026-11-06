@@ -15,6 +15,55 @@ Polars outputs. Source-specific adapters are intentionally outside the core:
 rename and convert source columns to the canonical schema before calling
 SQmdb.
 
+New to Python packages or Polars? Start with the
+[beginner API guide](docs/api-guide.md) for plain-language explanations of the
+public API, required inputs, model assumptions, and eager versus iterator
+results. The [API flow diagram](docs/api-flow.md) is a visual map of how the
+models and surfaces connect.
+
+## Visualize pitch surfaces
+
+Install the optional plotting dependency with
+`python -m pip install ".[visualization]"`. `plot_pitch_surfaces` accepts
+already-computed, long-form pitch-control, pitch-value, and space-quality
+surfaces plus one frame of tracking. It renders three vertically stacked
+panels with shared player, ball, and velocity overlays; it does not fetch or
+transform data from a specific database or tracking provider.
+
+```python
+from sqmdb import plot_pitch_surfaces
+
+fig, axes = plot_pitch_surfaces(
+    control_surface,
+    pitch_value_surface,
+    quality_surface,
+    tracking_frame,
+    frame_id=1200,
+    match_id="match-1",
+    team_id="home",
+    config=config,
+)
+```
+
+The tracking frame must contain `player_id`, `team_id`, `x`, `y`, `vx`, `vy`,
+`ball_x`, and `ball_y`; positions are in metres, velocities are in metres per
+second, and ball coordinates must be constant across the frame. Rename source
+velocity columns through `velocity_x` and `velocity_y`. Surfaces must include
+the SQmdb grid indices and cell-center coordinates; `team_pitch_control` and
+`space_quality` are selected for the requested team, and space quality is
+validated as pitch control multiplied by pitch value. Pass `match_id` when the
+requested frame occurs in multiple matches. The chart is an original,
+single-column visualization of the three surfaces, not a reproduction of the
+paper's figure.
+
+## Data safety
+
+Never expose or commit raw tracking/pass rows, credentials, connection strings,
+query outputs, or other row-level source data to this repository or public
+artifacts. Keep provider-specific queries and local data private. Public
+changes may include reproducibility code, synthetic test data, aggregated
+findings, analysis, and reviewed visualizations only.
+
 ## Canonical tracking schema
 
 One row represents one player's position at one frame:
