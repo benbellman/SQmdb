@@ -24,7 +24,8 @@ models and surfaces connect.
 ## Visualize pitch surfaces
 
 Install the optional plotting dependency with
-`python -m pip install ".[visualization]"`. `plot_pitch_surfaces` accepts
+`python -m pip install ".[visualization]"` (Matplotlib and mplsoccer).
+`plot_pitch_surfaces` accepts
 already-computed, long-form pitch-control, pitch-value, and space-quality
 surfaces plus one frame of tracking. It renders three vertically stacked
 panels with shared player, ball, and velocity overlays; it does not fetch or
@@ -42,6 +43,8 @@ fig, axes = plot_pitch_surfaces(
     match_id="match-1",
     team_id="home",
     config=config,
+    attacking_team_color="tab:blue",
+    defending_team_color="tab:orange",
 )
 ```
 
@@ -54,7 +57,10 @@ the SQmdb grid indices and cell-center coordinates; `team_pitch_control` and
 validated as pitch control multiplied by pitch value. Pass `match_id` when the
 requested frame occurs in multiple matches. The chart is an original,
 single-column visualization of the three surfaces, not a reproduction of the
-paper's figure.
+paper's figure. The selected `team_id` is colored as the attacking team;
+additional pitch-style options are forwarded to `mplsoccer.Pitch`, with
+`pitch_type="secondspectrum"`, `pitch_length=105`, and `pitch_width=69` by
+default. Axes, ticks, and axis labels are hidden.
 
 ## Data safety
 

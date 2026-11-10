@@ -172,6 +172,7 @@ def test_validates_selected_frame_and_overlay_values():
 
 def test_render_is_repeatable_when_matplotlib_is_available():
     pytest.importorskip("matplotlib")
+    pytest.importorskip("mplsoccer")
     import matplotlib
 
     matplotlib.use("Agg")
@@ -187,6 +188,8 @@ def test_render_is_repeatable_when_matplotlib_is_available():
         match_id="sample",
         team_id="home",
         config=config,
+        pitch_length=config.pitch_length_m,
+        pitch_width=config.pitch_width_m,
     )
     first.canvas.draw()
     first_pixels = np.asarray(first.canvas.buffer_rgba()).copy()
@@ -199,6 +202,8 @@ def test_render_is_repeatable_when_matplotlib_is_available():
         match_id="sample",
         team_id="home",
         config=config,
+        pitch_length=config.pitch_length_m,
+        pitch_width=config.pitch_width_m,
     )
     second.canvas.draw()
     second_pixels = np.asarray(second.canvas.buffer_rgba()).copy()
@@ -206,6 +211,49 @@ def test_render_is_repeatable_when_matplotlib_is_available():
     np.testing.assert_array_equal(first_pixels, second_pixels)
     plt.close(first)
     plt.close(second)
+
+
+def test_pitch_defaults_and_attacking_defending_colors():
+    pytest.importorskip("matplotlib")
+    pytest.importorskip("mplsoccer")
+    import matplotlib
+    from matplotlib.collections import PathCollection
+    from matplotlib.colors import to_rgba
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    control, value, quality, tracking, config = visualization_data()
+    fig, axes = plot_pitch_surfaces(
+        control,
+        value,
+        quality,
+        tracking,
+        12,
+        match_id="sample",
+        team_id="home",
+        config=config,
+        attacking_team_color="#123456",
+        defending_team_color="#654321",
+    )
+
+    assert len(axes) == 3
+    assert axes[0].get_xlim() == (-52.5, 52.5)
+    assert axes[0].get_ylim() == (-34.5, 34.5)
+    player_and_ball = [
+        collection
+        for collection in axes[0].collections
+        if isinstance(collection, PathCollection)
+    ]
+    assert player_and_ball[0].get_facecolors()[0] == pytest.approx(
+        to_rgba("#654321")
+    )
+    assert player_and_ball[1].get_facecolors()[0] == pytest.approx(
+        to_rgba("#123456")
+    )
+    assert not any(label.get_visible() for label in axes[0].get_xticklabels())
+    assert not any(label.get_visible() for label in axes[0].get_yticklabels())
+    plt.close(fig)
 
 
 def test_rejects_invalid_velocity_arrow_duration():

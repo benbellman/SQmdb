@@ -21,6 +21,7 @@ class _PreparedPitchData:
     ball_x: float
     ball_y: float
     teams: tuple[Any, ...]
+    attacking_team: Any
 
 
 def _frame_rows(
@@ -224,6 +225,7 @@ def _prepare_pitch_data(
         ball_x=float(ball.get_column("ball_x")[0]),
         ball_y=float(ball.get_column("ball_y")[0]),
         teams=selected_teams,
+        attacking_team=team_id,
     )
 
 
@@ -241,6 +243,12 @@ def plot_pitch_surfaces(
     velocity_y: str = "vy",
     velocity_arrow_seconds: float = 0.5,
     figsize: tuple[float, float] = (10.0, 15.0),
+    attacking_team_color: Any = "tab:blue",
+    defending_team_color: Any = "tab:orange",
+    pitch_type: str = "secondspectrum",
+    pitch_length: float = 105.0,
+    pitch_width: float = 69.0,
+    **pitch_kwargs: Any,
 ) -> tuple[Any, np.ndarray]:
     """Plot three aligned team surfaces with the selected frame's tracking.
 
@@ -249,9 +257,12 @@ def plot_pitch_surfaces(
     position repeated consistently across the frame. The surfaces use SQmdb's
     zero-based ``grid_i``/``grid_j`` cell-center coordinates.
 
-    Matplotlib is an optional dependency; install ``sqmdb[visualization]`` to
-    render charts. The returned axes are ordered pitch control, pitch value,
-    and space quality from top to bottom.
+    Matplotlib and mplsoccer are optional dependencies; install
+    ``sqmdb[visualization]`` to render charts. Pitch construction options can
+    be passed as keyword arguments and are forwarded to ``mplsoccer.Pitch``.
+    ``team_id`` is treated as the attacking team for player colors. The
+    returned axes are ordered pitch control, pitch value, and space quality
+    from top to bottom.
     """
     if not np.isfinite(velocity_arrow_seconds) or velocity_arrow_seconds <= 0:
         raise ValueError("velocity_arrow_seconds must be a positive finite number.")
@@ -272,10 +283,11 @@ def plot_pitch_surfaces(
     try:
         import matplotlib.pyplot as plt
         from matplotlib.lines import Line2D
-        from matplotlib.patches import Circle
+        from mplsoccer import Pitch
     except ImportError as error:
         raise ImportError(
-            "Pitch visualization requires Matplotlib; install sqmdb[visualization]."
+            "Pitch visualization requires Matplotlib and mplsoccer; "
+            "install sqmdb[visualization]."
         ) from error
 
     def cell_edges(centers: np.ndarray, extent: float) -> np.ndarray:
@@ -290,8 +302,8 @@ def plot_pitch_surfaces(
             )
         )
 
-    x_edges = cell_edges(prepared.x, config.pitch_length_m)
-    y_edges = cell_edges(prepared.y, config.pitch_width_m)
+    x_edges = cell_edges(prepared.x, pitch_length)
+    y_edges = cell_edges(prepared.y, pitch_width)
     fig, axes = plt.subplots(3, 1, figsize=figsize, sharex=True, sharey=True)
     panels = (
         ("Pitch control", prepared.pitch_control, "coolwarm", -1.0, 1.0),
@@ -299,9 +311,28 @@ def plot_pitch_surfaces(
         ("Space quality", prepared.space_quality, "coolwarm", -1.0, 1.0),
     )
     team_colors = {
-        team: plt.get_cmap("tab10")(index % 10)
-        for index, team in enumerate(prepared.teams)
+        team: (
+            attacking_team_color
+            if team == prepared.attacking_team
+            else defending_team_color
+        )
+        for team in prepared.teams
     }
+    pitch_options: dict[str, Any] = {
+        "pitch_type": pitch_type,
+        "pitch_length": pitch_length,
+        "pitch_width": pitch_width,
+        "line_color": "white",
+        "line_zorder": 2,
+        "axis": False,
+        "label": False,
+        "pad_left": 0,
+        "pad_right": 0,
+        "pad_bottom": 0,
+        "pad_top": 0,
+    }
+    pitch_options.update(pitch_kwargs)
+    pitch = Pitch(**pitch_options)
     for ax, (title, values, cmap, vmin, vmax) in zip(axes, panels):
         image = ax.pcolormesh(
             x_edges,
@@ -312,27 +343,8 @@ def plot_pitch_surfaces(
             vmax=vmax,
             shading="flat",
         )
+        pitch.draw(ax=ax)
         ax.set_title(title, loc="left")
-        ax.set_xlim(-config.pitch_length_m / 2, config.pitch_length_m / 2)
-        ax.set_ylim(-config.pitch_width_m / 2, config.pitch_width_m / 2)
-        ax.set_aspect("equal", adjustable="box")
-        ax.plot(
-            [0, 0],
-            [-config.pitch_width_m / 2, config.pitch_width_m / 2],
-            color="white",
-            linewidth=1.0,
-            alpha=0.9,
-        )
-        ax.add_patch(
-            Circle(
-                (0, 0),
-                min(9.15, config.pitch_width_m / 2),
-                fill=False,
-                edgecolor="white",
-                linewidth=1.0,
-                alpha=0.9,
-            )
-        )
         for team in prepared.teams:
             team_players = prepared.players.filter(pl.col("team_id") == team)
             x = team_players.get_column("x").to_numpy()
@@ -396,8 +408,6 @@ def plot_pitch_surfaces(
         )
     )
     fig.legend(handles=handles, loc="upper center", ncol=max(1, len(handles)))
-    fig.supxlabel("x (m)")
-    fig.supylabel("y (m)")
     fig.suptitle(f"Frame {frame_id}", y=0.995)
     fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.97))
     return fig, axes
