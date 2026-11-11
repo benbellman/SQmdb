@@ -16,13 +16,14 @@ from .pitch_value import (
     pitch_value,
 )
 from .space_quality import space_quality
-from .visualization import plot_pitch_surfaces
+from .visualization import add_plot_velocities, plot_pitch_surfaces
 
 __all__ = [
     "PlayerMovementModel",
     "PitchValueModel",
     "PassHorizonModel",
     "SQConfig",
+    "add_plot_velocities",
     "defensive_influence_samples",
     "fit_player_movement_model",
     "iter_defensive_influence_samples",
