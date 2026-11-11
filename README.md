@@ -32,8 +32,11 @@ panels with shared player, ball, and velocity overlays; it does not fetch or
 transform data from a specific database or tracking provider.
 
 ```python
-from sqmdb import plot_pitch_surfaces
+import polars as pl
+from sqmdb import add_plot_velocities, plot_pitch_surfaces
 
+tracking_with_velocities = add_plot_velocities(tracking, config)
+tracking_frame = tracking_with_velocities.filter(pl.col("frame_id") == 1200)
 fig, axes = plot_pitch_surfaces(
     control_surface,
     pitch_value_surface,
@@ -43,15 +46,22 @@ fig, axes = plot_pitch_surfaces(
     match_id="match-1",
     team_id="home",
     config=config,
-    attacking_team_color="tab:blue",
-    defending_team_color="tab:orange",
+    attacking_team_color="#D55E00",
+    defending_team_color="#0072B2",
 )
 ```
 
-The tracking frame must contain `player_id`, `team_id`, `x`, `y`, `vx`, `vy`,
-`ball_x`, and `ball_y`; positions are in metres, velocities are in metres per
-second, and ball coordinates must be constant across the frame. Rename source
-velocity columns through `velocity_x` and `velocity_y`. Surfaces must include
+The full tracking sequence should be passed through `add_plot_velocities`
+before selecting individual frames. It adds `vx`, `vy`, `ball_vx`, and
+`ball_vy` in metres per second from positions separated by the configured
+velocity lag; frames without a matching lagged position receive zero. The
+tracking frame passed to the plot must contain `player_id`, `team_id`, `x`,
+`y`, `ball_x`, and `ball_y`; ball coordinates must be constant across the
+frame. If either player or ball velocity components are absent, plotting warns
+with the helper syntax and omits the corresponding arrows. Player velocity
+columns can be renamed through `velocity_x` and `velocity_y`; ball velocity
+columns can be renamed through `ball_velocity_x` and `ball_velocity_y`. Present
+ball velocity columns must be constant across the frame. Surfaces must include
 the SQmdb grid indices and cell-center coordinates; `team_pitch_control` and
 `space_quality` are selected for the requested team, and space quality is
 validated as pitch control multiplied by pitch value. Pass `match_id` when the
@@ -60,7 +70,15 @@ single-column visualization of the three surfaces, not a reproduction of the
 paper's figure. The selected `team_id` is colored as the attacking team;
 additional pitch-style options are forwarded to `mplsoccer.Pitch`, with
 `pitch_type="secondspectrum"`, `pitch_length=105`, and `pitch_width=69` by
-default. Axes, ticks, and axis labels are hidden.
+default. The pitch-control and space-quality surfaces use a custom diverging
+scale: the defending color at -1, a neutral midpoint at 0, and the attacking
+color at +1. Player dots use those same team colors. The default colors are
+color-blind friendly, and player (and available ball) velocity arrows project
+1.5 seconds ahead by default. Pitch value uses a five-stop scale at 0, 0.25,
+0.5, 0.75, and 1: `#f6eff7`, `#bdc9e1`, `#67a9cf`, `#1c9099`, and `#016c59`.
+Pitch lines are black; axes, ticks, and axis labels are hidden. The ball
+overlay uses a compact bundled icon displayed slightly smaller than the player
+markers, with a black velocity arrow.
 
 ## Data safety
 

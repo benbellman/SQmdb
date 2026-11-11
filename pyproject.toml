@@ -22,5 +22,8 @@ visualization = ["matplotlib>=3.7", "mplsoccer>=1.2"]
 [tool.setuptools.packages.find]
 include = ["sqmdb*", "examples*"]
 
+[tool.setuptools.package-data]
+sqmdb = ["assets/*.png"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
