@@ -74,7 +74,9 @@ default. The pitch-control and space-quality surfaces use a custom diverging
 scale: the defending color at -1, a neutral midpoint at 0, and the attacking
 color at +1. Player dots use those same team colors. The default colors are
 color-blind friendly, and player (and available ball) velocity arrows project
-1.5 seconds ahead by default. Pitch value uses a five-stop scale at 0, 0.25,
+1.5 seconds ahead by default. A small, figure-anchored caption at the bottom
+states the possession direction and the velocity projection duration. Pitch
+value uses a five-stop scale at 0, 0.25,
 0.5, 0.75, and 1: `#f6eff7`, `#bdc9e1`, `#67a9cf`, `#1c9099`, and `#016c59`.
 Pitch lines are black; axes, ticks, and axis labels are hidden. The ball
 overlay uses a compact bundled icon displayed slightly smaller than the player

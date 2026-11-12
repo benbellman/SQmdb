@@ -347,6 +347,7 @@ def plot_pitch_surfaces(
     tracking: pl.DataFrame | pl.LazyFrame,
     frame_id: int,
     *,
+    title: str | None = None,
     match_id: Any | None = None,
     team_id: Any | None = None,
     config: SQConfig = SQConfig(),
@@ -523,7 +524,7 @@ def plot_pitch_surfaces(
     legend_font_size = (
         FontProperties(size=plt.rcParams["legend.fontsize"]).get_size_in_points() + 2
     )
-    for ax, (title, values, cmap, vmin, vmax) in zip(axes, panels):
+    for ax, (panel_title, values, cmap, vmin, vmax) in zip(axes, panels):
         image = ax.pcolormesh(
             x_edges,
             y_edges,
@@ -540,7 +541,7 @@ def plot_pitch_surfaces(
             shading="flat",
         )
         pitch.draw(ax=ax)
-        ax.set_title(title, loc="left", fontsize=panel_title_size)
+        ax.set_title(panel_title, loc="left", fontsize=panel_title_size)
         for team in prepared.teams:
             team_players = prepared.players.filter(pl.col("team_id") == team)
             x = team_players.get_column("x").to_numpy()
@@ -616,7 +617,56 @@ def plot_pitch_surfaces(
         )
         for team in prepared.teams
     ]
-    fig.tight_layout(rect=(0.02, 0.02, 0.98, 0.935))
+    caption_text = (
+        "The possession team represents positive values and is attacking "
+        "left-to-right. Velocity arrows project locations in "
+        f"{velocity_arrow_seconds:g} seconds."
+    )
+    caption_font = FontProperties(size=10)
+    layout_bottom = 0.008
+    caption = None
+    for _ in range(5):
+        fig.tight_layout(rect=(0.02, layout_bottom, 0.98, 0.935))
+        fig.canvas.draw()
+        panel_left = axes[0].get_position().x0
+        panel_right = axes[0].get_position().x1
+        renderer = fig.canvas.get_renderer()
+        wrap_width = (panel_right - panel_left) * fig.bbox.width
+        lines: list[str] = []
+        line = ""
+        for word in caption_text.split():
+            candidate = f"{line} {word}".strip()
+            text_width = renderer.get_text_width_height_descent(
+                candidate,
+                caption_font,
+                ismath=False,
+            )[0]
+            if line and text_width > wrap_width:
+                lines.append(line)
+                line = word
+            else:
+                line = candidate
+        if line:
+            lines.append(line)
+        if caption is not None:
+            caption.remove()
+        caption = fig.text(
+            panel_left,
+            0.005,
+            "\n".join(lines),
+            ha="left",
+            va="bottom",
+            fontsize=10,
+        )
+        fig.canvas.draw()
+        caption_top = caption.get_window_extent().transformed(
+            fig.transFigure.inverted()
+        ).y1
+        gap = axes[-1].get_position().y0 - caption_top
+        if gap >= 0.01:
+            break
+        layout_bottom += 0.01 - gap
+
     panel_left = axes[0].get_position().x0
     fig.legend(
         handles=handles,
@@ -627,7 +677,7 @@ def plot_pitch_surfaces(
         borderaxespad=0,
     )
     fig.suptitle(
-        f"Frame {frame_id}",
+        f"Frame {frame_id}" if title is None else title,
         x=panel_left,
         y=0.995,
         ha="left",

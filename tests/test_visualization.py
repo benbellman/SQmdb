@@ -434,6 +434,53 @@ def test_default_team_colors_and_velocity_arrow_scale():
     assert legend_left == pytest.approx(panel_left)
     assert fig._suptitle.get_ha() == "left"
     assert fig._suptitle.get_position()[0] == pytest.approx(panel_left)
+    assert fig._suptitle.get_text() == "Frame 12"
+    caption = next(
+        text for text in fig.texts if text.get_text().startswith("The possession team")
+    )
+    assert " ".join(caption.get_text().split()) == (
+        "The possession team represents positive values and is attacking "
+        "left-to-right. Velocity arrows project locations in 1.5 seconds."
+    )
+    assert caption.get_fontsize() == pytest.approx(10)
+    assert caption.get_position() == (panel_left, 0.005)
+    assert caption.get_ha() == "left"
+    assert caption.get_transform() == fig.transFigure
+    caption_bbox = caption.get_window_extent().transformed(fig.transFigure.inverted())
+    assert "\n" in caption.get_text()
+    assert caption_bbox.x0 == pytest.approx(panel_left)
+    assert caption_bbox.x1 <= axes[0].get_position().x1
+    caption_bottom = caption_bbox.y1
+    axis_bottom = axes[-1].get_position().y0
+    assert caption_bottom < axis_bottom
+    assert axis_bottom - caption_bottom < 0.02
+    plt.close(fig)
+
+
+def test_plot_title_can_be_overridden():
+    pytest.importorskip("matplotlib")
+    pytest.importorskip("mplsoccer")
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    control, value, quality, tracking, config = visualization_data()
+    fig, _ = plot_pitch_surfaces(
+        control,
+        value,
+        quality,
+        tracking,
+        12,
+        title="Match overview",
+        match_id="sample",
+        team_id="home",
+        config=config,
+        pitch_length=config.pitch_length_m,
+        pitch_width=config.pitch_width_m,
+    )
+
+    assert fig._suptitle.get_text() == "Match overview"
     plt.close(fig)
 
 
@@ -580,6 +627,7 @@ def test_plot_title_legend_and_symbology_fonts_are_two_points_larger():
         match_id="sample",
         team_id="home",
         config=config,
+        velocity_arrow_seconds=2.25,
         pitch_length=config.pitch_length_m,
         pitch_width=config.pitch_width_m,
     )
@@ -599,6 +647,13 @@ def test_plot_title_legend_and_symbology_fonts_are_two_points_larger():
         legend_font_size + 2
     )
     assert fig.legends[0].legend_handles[0].get_markersize() == pytest.approx(8)
+    assert " ".join(
+        next(
+            text.get_text()
+            for text in fig.texts
+            if text.get_text().startswith("The possession team")
+        ).split()
+    ).endswith("in 2.25 seconds.")
     plt.close(fig)
 
 
