@@ -102,6 +102,64 @@ def test_fit_and_stream_player_influence_with_frame_stride() -> None:
     assert all(batch.height <= config.batch_frames * 2 * config.grid().height for batch in batches)
 
 
+def test_player_influence_and_pitch_value_share_selected_frames_and_batch_flush() -> None:
+    tracking = pl.concat(
+        [
+            sample_tracking(31).with_columns(pl.lit("match-1").alias("match_id")),
+            sample_tracking(31).with_columns(pl.lit("match-2").alias("match_id")),
+        ],
+        how="vertical",
+    )
+    config = small_config(frame_stride=4, batch_frames=3)
+    movement_model = fit_player_movement_model(tracking, config)
+    player_batches = list(
+        iter_player_influence(
+            tracking,
+            movement_model,
+            config,
+            horizon_seconds=0.2,
+        )
+    )
+    player_batch_frames = [
+        batch.height // (2 * config.grid().height) for batch in player_batches
+    ]
+    assert player_batch_frames == [3, 3, 2, 3, 3, 2]
+    player_frames = {
+        (match_id, frame_id)
+        for match_id, frame_id in pl.concat(player_batches)
+        [["match_id", "frame_id"]]
+        .unique()
+        .iter_rows()
+    }
+
+    surfaces = pl.concat(player_batches)
+    labels = defensive_influence_samples(surfaces, tracking)
+    model = PitchValueModel.fit(
+        labels,
+        hidden_layer_sizes=(8,),
+        max_iter=300,
+        max_training_samples=20,
+    )
+    pitch_batches = list(iter_pitch_value(tracking, model, config))
+    pitch_batch_frames = [
+        batch.height // config.grid().height for batch in pitch_batches
+    ]
+    assert pitch_batch_frames == [3, 3, 2, 3, 3, 2]
+    pitch_frames = {
+        (match_id, frame_id)
+        for match_id, frame_id in pl.concat(pitch_batches)
+        [["match_id", "frame_id"]]
+        .unique()
+        .iter_rows()
+    }
+    assert player_frames == pitch_frames
+    assert player_frames == {
+        (match_id, frame_id)
+        for match_id in ("match-1", "match-2")
+        for frame_id in [0, 4, 8, 12, 16, 20, 24, 28]
+    }
+
+
 def test_pitch_value_training_and_space_quality() -> None:
     tracking = sample_tracking()
     config = small_config(frame_stride=4)

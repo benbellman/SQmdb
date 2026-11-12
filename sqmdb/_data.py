@@ -123,6 +123,10 @@ def tracking_batches(
         for frame in complete.partition_by(
             ["match_id", "frame_id"], maintain_order=True
         ):
+            match_id = frame.get_column("match_id")[0]
+            if active_match is not None and match_id != active_match and frame_buffer:
+                yield pl.concat(frame_buffer, how="vertical")
+                frame_buffer.clear()
             batch = consume(frame)
             if batch is not None:
                 yield batch
@@ -130,6 +134,10 @@ def tracking_batches(
         for frame in pending.partition_by(
             ["match_id", "frame_id"], maintain_order=True
         ):
+            match_id = frame.get_column("match_id")[0]
+            if active_match is not None and match_id != active_match and frame_buffer:
+                yield pl.concat(frame_buffer, how="vertical")
+                frame_buffer.clear()
             batch = consume(frame)
             if batch is not None:
                 yield batch

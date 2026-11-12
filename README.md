@@ -292,9 +292,17 @@ coordinates, and their respective values; player influence also contains
 `player_id` and `team_id`. `space_quality` returns one row per team and grid
 cell with team pitch control and space quality. Keep `grid_i`, `grid_j`, the
 `SQConfig` pitch/grid settings, and coordinate orientation with persisted
-surfaces to support later array reconstruction. `frame_stride` defaults to 1
-(all frames); set it to e.g. 25 for 1 Hz data from 25 Hz tracking. Batches are
-bounded by `batch_frames`, which defaults to one frame.
+surfaces to support later array reconstruction.
+
+`frame_stride` selects the output frames to materialize from the underlying
+tracking stream (`frame_stride=25` for 1 Hz outputs from 25 Hz tracking). It is
+a temporal sampling choice, not a change to the movement model's internal
+velocity history. `batch_frames` separately bounds how many selected output
+frames are yielded in each output batch; it does not change which frames are
+selected. For example, with 25 Hz tracking and `frame_stride=25`, a 1-second
+output surface still uses the previous 0.2-second velocity lag internally, while
+`batch_frames` controls whether a yielded batch contains up to 1, 4, or 8
+selected frames.
 
 ## Method and scope
 

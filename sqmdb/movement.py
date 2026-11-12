@@ -288,17 +288,21 @@ def iter_player_influence(
     history: dict[tuple[Any, Any, int], tuple[float, float]] = {}
     first_frame_by_match: dict[Any, int] = {}
     active_match_id: Any = None
+    output_buffer: list[pl.DataFrame] = []
 
     for batch in tracking_batches(source, config, frame_stride=1):
         validate_tracking_batch(batch, config)
-        output_frames: list[pl.DataFrame] = []
         for frame in batch.partition_by(
             ["match_id", "frame_id"], maintain_order=True
         ):
             match_id = frame.get_column("match_id")[0]
             frame_id = int(frame.get_column("frame_id")[0])
-            if active_match_id != match_id:
+            if active_match_id is not None and match_id != active_match_id:
+                if output_buffer:
+                    yield pl.concat(output_buffer, how="vertical")
+                    output_buffer.clear()
                 history.clear()
+            if active_match_id != match_id:
                 active_match_id = match_id
                 first_frame_by_match[match_id] = frame_id
             first_frame = first_frame_by_match[match_id]
@@ -349,7 +353,7 @@ def iter_player_influence(
                     team_ids.append(player["team_id"])
 
             if frame_is_selected:
-                output_frames.append(
+                output_buffer.append(
                     pl.DataFrame(
                         {
                             "match_id": [match_id] * (len(player_ids) * grid.height),
@@ -370,6 +374,9 @@ def iter_player_influence(
                         }
                     )
                 )
+                if len(output_buffer) >= config.batch_frames:
+                    yield pl.concat(output_buffer, how="vertical")
+                    output_buffer.clear()
 
             for player in frame_players:
                 history[(match_id, player["player_id"], frame_id)] = (
@@ -380,8 +387,8 @@ def iter_player_influence(
             for history_key in list(history):
                 if history_key[0] == match_id and history_key[2] < cutoff:
                     del history[history_key]
-        if output_frames:
-            yield pl.concat(output_frames, how="vertical")
+    if output_buffer:
+        yield pl.concat(output_buffer, how="vertical")
 
 
 def player_influence(
