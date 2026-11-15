@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,27 @@ name = "sqmdb"
 version = "0.1.0"
 description = "Polars-first soccer tracking surfaces based on Martens, Dick, and Brefeld (2021)"
 readme = "README.md"
+authors = [{ name = "Ben Bellman" }]
+maintainers = [{ name = "Ben Bellman" }]
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
+keywords = [
+    "soccer",
+    "football",
+    "tracking data",
+    "sports analytics",
+    "Polars",
+    "pitch control",
+    "player influence",
+    "pitch value",
+    "space quality",
+]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
 dependencies = [
     "numpy>=1.24",
     "polars>=1.25",
@@ -19,11 +39,13 @@ dependencies = [
 test = ["pytest>=8"]
 visualization = ["matplotlib>=3.7", "mplsoccer>=1.2"]
 
+[project.urls]
+Documentation = "https://github.com/benbellman/SQmdb/tree/main/docs"
+Repository = "https://github.com/benbellman/SQmdb"
+Issues = "https://github.com/benbellman/SQmdb/issues"
+
 [tool.setuptools.packages.find]
 include = ["sqmdb*", "examples*"]
-
-[tool.setuptools.package-data]
-sqmdb = ["assets/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from importlib.resources import as_file, files
 from typing import Any
 
 import numpy as np
@@ -442,16 +441,12 @@ def plot_pitch_surfaces(
         from matplotlib.colors import LinearSegmentedColormap
         from matplotlib.font_manager import FontProperties
         from matplotlib.lines import Line2D
-        from matplotlib.offsetbox import AnnotationBbox, OffsetImage
         from mplsoccer import Pitch
     except ImportError as error:
         raise ImportError(
             "Pitch visualization requires Matplotlib and mplsoccer; "
             "install sqmdb[visualization]."
         ) from error
-    with as_file(files("sqmdb").joinpath("assets", "soccer_ball.png")) as ball_icon_path:
-        ball_icon = plt.imread(ball_icon_path)
-
     def cell_edges(centers: np.ndarray, extent: float) -> np.ndarray:
         if len(centers) == 1:
             return np.array([-extent / 2, extent / 2])
@@ -592,15 +587,15 @@ def plot_pitch_surfaces(
                 width=0.004,
                 zorder=5,
             )
-        ax.add_artist(
-            AnnotationBbox(
-                OffsetImage(ball_icon, zoom=0.27),
-                (prepared.ball_x, prepared.ball_y),
-                frameon=False,
-                box_alignment=(0.5, 0.5),
-                pad=0,
-                zorder=6,
-            )
+        ax.scatter(
+            [prepared.ball_x],
+            [prepared.ball_y],
+            marker="o",
+            facecolor="white",
+            edgecolor="black",
+            linewidth=0.8,
+            s=24,
+            zorder=6,
         )
         fig.colorbar(image, ax=ax, pad=0.02, fraction=0.04)
 
