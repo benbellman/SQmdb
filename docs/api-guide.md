@@ -1,112 +1,384 @@
-# SQmdb API guide
+# SQmdb API manual
 
-SQmdb turns soccer tracking and pass-event data into values on a football-pitch
-grid. This guide describes the public Python API, how its pieces fit together,
-and what to expect from its inputs and outputs. The examples use made-up
-column names and data; use your own approved data source and never commit
-private tracking rows, pass records, credentials, or query output.
+SQmdb works with Polars tables. This manual describes the public names exported
+from `sqmdb`, including every function argument, its type and unit, defaults,
+results, and important limitations. It is written for readers who are new to
+Python and Polars. For a narrated walkthrough of the complete workflow, see
+the [example pipeline](api-flow.md).
 
-For the API flow at a glance, see [the API flow diagram](api-flow.md). The
-repository [README](../README.md) has a complete workflow example, canonical
-column table, local database adapter example, and method limitations.
+## Basic terms
 
-## Python and data terms
+- A Polars **DataFrame** is a table held in memory. A **LazyFrame** describes
+  table operations that Polars executes when needed. Some SQmdb operations
+  collect data even when given a LazyFrame; the individual entries explain
+  which results are eager or yielded in batches.
+- A **pitch grid** is a set of cell centers laid over the pitch. A **surface**
+  is a table containing a value for each selected frame and grid cell.
+- An **iterator** yields a sequence of Polars DataFrame batches. It can avoid
+  keeping the entire output in memory, but it does not make model fitting or
+  every intermediate calculation lazy.
+- Coordinates and distances are in metres unless stated otherwise.
 
-- **Package:** SQmdb is a collection of Python modules installed into a Python
-  environment. Install it from the repository with `python -m pip install .`.
-  The `pip` command installs packages; `import sqmdb` makes the installed
-  package's public names available to a Python program.
-- **Polars:** Polars is the table library SQmdb uses. A `DataFrame` is a table
-  already held in memory. A `LazyFrame` is a description of table operations
-  that Polars can plan before executing them. SQmdb accepts both in many
-  functions, but a `LazyFrame` input does **not** make every operation lazy:
-  model fitting and some results are collected before the function returns.
-- **Grid and surface:** `SQConfig.grid()` lays out cell centers over a pitch.
-  A surface is a table of values at those cells, generally one row per
-  `match_id`, `frame_id`, `grid_i`, and `grid_j` (and, for player influence,
-  `player_id`). Surfaces are in long/table form, not a 2-D image array.
-- **Eager result:** A function that returns a complete `DataFrame` or fitted
-  model computes that result before returning. Eager convenience functions
-  may retain many frames' surface rows in memory.
-- **Iterator:** A function whose name starts with `iter_` returns a Python
-  iterator. Each iteration yields a Polars `DataFrame` batch, so a caller can
-  write or inspect results incrementally instead of concatenating an entire
-  match in memory. An iterator is not a promise that all upstream fitting or
-  each individual frame is lazy; see each API entry below.
+## Input conventions
 
-## Recommended workflow
+Tracking input generally needs `frame_id`, `player_id`, `team_id`, `x`, and
+`y`; use a `match_id` when the table contains multiple matches. Coordinates
+must be finite, in metres, centered at `(0, 0)`, and oriented so that the
+attacking direction is positive x. Rows must be unique per match/frame/player.
+Iterator-based calculations require match-grouped rows ordered by frame.
 
-1. Convert source data to the [canonical schema](../README.md#canonical-tracking-schema):
-   coordinates in metres, pitch centered at `(0, 0)`, and the attacking
-   direction toward positive x. Keep rows grouped by match and ordered by
-   frame for iterator-based tracking calculations.
-2. Set pitch size, grid resolution, frame rate, and batch behavior with
-   `SQConfig`.
-3. Fit `PlayerMovementModel` on historical tracking. Optionally fit
-   `PassHorizonModel` from completed passes; otherwise use a fixed movement
-   horizon.
-4. Calculate player influence. Build defensive-influence training labels from
-   historical player surfaces, fit `PitchValueModel`, then calculate pitch
-   value for the frames you want to analyze.
-5. Combine player influence and pitch value with `space_quality`. Optionally
-   render all three surfaces for a selected frame with `plot_pitch_surfaces`.
+Pitch-value training additionally uses `ball_x`, `ball_y`, and
+`possession_team_id`, consistent across all player rows in a frame. Pass
+horizon fitting uses `pass_distance_m` in metres and
+`pass_duration_seconds` in seconds. SQmdb does not connect to a data source or
+infer the meaning of source columns; transform your data before passing it
+to the package.
 
-## Public API reference
+## `SQConfig`
 
-Every name in `sqmdb.__all__` is listed here. Imports use the package root,
-for example `from sqmdb import SQConfig, fit_player_movement_model`.
+`SQConfig` stores pitch geometry, sampling, density, and output-batching
+settings. Construct it with keyword arguments; omitted values use these
+defaults:
 
-| Public name | What it does | Inputs and result | Execution and important assumptions |
+| Argument | Type and unit | Default | Meaning |
 | --- | --- | --- | --- |
-| `SQConfig` | Holds pitch, grid, sampling, movement-density, and batch settings. | Construct with keyword settings; `grid()` returns a Polars table of `grid_i`, `grid_j`, `x`, and `y` cell centers. `from_metadata(mapping, **overrides)` reads canonical pitch-dimension keys and uses defaults for absent dimensions. | Grid indices start at zero. Coordinates are centered in metres and the positive x direction is the attack direction. Defaults are 105 × 68 m, 1 m resolution, 25 frames/s, and one frame per output batch. |
-| `PlayerMovementModel` | Fitted, player- and speed-conditioned movement distributions. | Returned by `fit_player_movement_model`; use it with `iter_player_influence` or `player_influence`. Its `horizons` property lists the horizons actually fitted. | Not a raw endpoint table; it holds smoothed binned density maps in memory. Missing player/speed-bin fits can fall back to a pooled distribution. |
-| `fit_player_movement_model` | Learns likely player movement from historical trajectories. | `tracking` with `frame_id`, `player_id`, `team_id`, `x`, `y`; optional `config` and `sample_stride`. Returns `PlayerMovementModel`. | Eager model fitting. Uses exact frame IDs for configured time offsets and requires unique rows per match/frame/player. More trajectory data improves coverage of speed bins and horizons. |
-| `PassHorizonModel` | Learns typical pass travel time from pass distance. | `PassHorizonModel.fit(passes)` expects `pass_distance_m` and `pass_duration_seconds`; `.predict(distance)` returns predicted seconds as a NumPy array. | Fit is eager and requires at least 10 finite completed passes, positive durations, non-negative distances, and at least two distinct distances. Predictions are clipped to observed duration limits. |
-| `iter_player_influence` | Calculates each player's influence over the pitch grid for selected frames. | Tracking plus a fitted movement model and optional `config`; choose either fixed `horizon_seconds` (defaults to 1 second) or `horizon_model`, not both. `frame_stride` can select output frames. Yields batches with player/team, frame, grid coordinates, and `player_influence`. | Streaming-style output in complete frame batches; input rows must be grouped by match and ordered by frame. A pass horizon model also requires per-frame `ball_x` and `ball_y`. Output volume grows with frames × players × grid cells. |
-| `player_influence` | Convenience form of `iter_player_influence`. | Same inputs; returns a single Polars `DataFrame`. | Eager: consumes and concatenates all iterator batches. Prefer the iterator for large inputs. |
-| `iter_defensive_influence_samples` | Creates pitch-value training labels from batches of player surfaces. | An iterable of player-surface `DataFrame`s and tracking with `possession_team_id`, `ball_x`, and `ball_y` on each frame; tracking also needs the canonical identity columns. Yields label batches with `grid_x`, `grid_y`, `ball_x`, `ball_y`, and `defensive_influence`. | Yields per input batch, but each batch's label result is collected before yielding. Goalkeepers are excluded when tracking provides `is_goalkeeper`; defending influence is summed and capped at 1. |
-| `defensive_influence_samples` | Convenience form that creates all defensive-influence labels together. | One surface `DataFrame`/`LazyFrame` or an iterable of surface batches plus tracking; returns one label `DataFrame`. | Eager: consumes all yielded batches and concatenates them. Use `iter_defensive_influence_samples` for larger histories. |
-| `PitchValueModel` | Predicts defensive influence from ball and grid-cell locations, then supports pitch-value surface calculation. | `PitchValueModel.fit(samples, ...)` expects `ball_x`, `ball_y`, `grid_x`, `grid_y`, and `defensive_influence`. `.predict_defensive_influence(...)` accepts NumPy arrays for the four coordinates and returns predictions bounded to `[0, 1]`. | Fit is eager; at least 10 finite samples with labels in `[0, 1]` are required. Training is deterministically sampled above `max_training_samples`. |
-| `iter_pitch_value` | Predicts a pitch-value surface for each selected tracking frame. | Tracking with canonical player columns plus `ball_x` and `ball_y`; a fitted `PitchValueModel`; optional `config` and `frame_stride`. Yields batches with frame/grid coordinates and `pitch_value`. | Yields bounded frame batches. Each frame needs consistent ball coordinates. |
-| `pitch_value` | Convenience form of `iter_pitch_value`. | Same inputs; returns one Polars `DataFrame`. | Eager: consumes and concatenates all batches. Use the iterator for large inputs. |
-| `space_quality` | Combines team influence and pitch value into team pitch control and space quality. | Player influence surfaces and pitch-value surfaces; returns a Polars table with `team_pitch_control`, `pitch_value`, and `space_quality` by frame, team, and grid cell. | Eager: returns a collected `DataFrame`. Pitch control is `tanh(team influence - opponent influence)`; space quality is pitch control × pitch value. |
-| `add_plot_velocities` | Adds player and ball velocity components for visualization from position differences. | Tracking with `frame_id`, `player_id`, `x`, `y`, `ball_x`, and `ball_y`, plus optional `config`; returns a Polars `LazyFrame` with `vx`, `vy`, `ball_vx`, and `ball_vy`. | Uses the nearest whole-frame lag to `config.velocity_lag_seconds`; match and player IDs keep comparisons within the same match/player. Missing lagged positions, including at the beginning of a match, receive zero velocity. Apply it to the full tracking sequence before filtering to plot frames. |
-| `plot_pitch_surfaces` | Draws a three-panel view of pitch control, pitch value, and space quality using mplsoccer pitch markings, with the same frame's players, velocities, and ball overlaid. | Three compatible surfaces, tracking for the selected `frame_id`, optional `match_id`, `team_id`, and `title`, and `SQConfig`; returns `(figure, axes)`. Tracking needs `x`, `y`, `ball_x`, and `ball_y` by default. Player velocity columns default to `vx` and `vy`; ball velocity columns default to `ball_vx` and `ball_vy`. Pitch settings and attacking/defending team colors are configurable; extra pitch-style options are forwarded to `mplsoccer.Pitch`. | Materializes and validates only the selected frame before plotting. A custom `title` overrides the default `Frame {frame_id}` heading. Requires optional Matplotlib and mplsoccer dependencies (`python -m pip install ".[visualization]"`). The custom signed surface scale uses the defending color at -1, neutral at 0, and attacking color at +1; player markers use those team colors. Missing player or ball velocity columns emit a warning referencing `add_plot_velocities` and omit the corresponding arrows. Available arrows share the configured projection duration; the ball arrow is black. This is an original three-panel chart, not a reproduction of the paper's figure. |
+| `pitch_length_m` | `float`, metres | `105.0` | Pitch length along x |
+| `pitch_width_m` | `float`, metres | `68.0` | Pitch width along y |
+| `grid_resolution_m` | `float`, metres | `1.0` | Approximate spacing between grid-cell centers |
+| `frame_rate` | `float`, frames/second | `25.0` | Sampling rate used to convert frames to time |
+| `velocity_lag_seconds` | `float`, seconds | `0.2` | Time interval for velocity estimates |
+| `frame_stride` | `int`, frames | `1` | Select every nth output frame by default |
+| `batch_frames` | `int`, frames | `1` | Maximum selected frames in a yielded batch |
+| `movement_density_resolution_m` | `float`, metres | `0.5` | Cell width for the movement-density approximation |
+| `movement_density_extent_m` | `float`, metres | `30.0` | Half-width of the movement-density map around the origin |
+| `movement_kde_bandwidth_m` | `float`, metres | `1.0` | Smoothing bandwidth for movement densities |
+| `movement_horizons_seconds` | `tuple[float, ...]`, seconds | `0.2` to `5.0`, in `0.2`-second steps | Future movement horizons fitted from tracking |
+| `movement_min_samples` | `int`, observations | `20` | Minimum observations in a player/bin/horizon distribution |
 
-### Surfaces and frame keys
+Constructing the class returns an `SQConfig` instance.
 
-Each calculation should use compatible match and frame IDs, pitch dimensions,
-and grid settings. `match_id` is optional in input tables; when omitted,
-SQmdb treats the input as a single match. When saving surface tables, retain
-`match_id`, `frame_id`, `grid_i`, `grid_j`, `x`, and `y`, as well as the
-`SQConfig` settings used to create them. The grid indices identify a cell;
-`x` and `y` give its location in metres.
+All lengths, rates, and horizons must be positive and finite. Stride and batch
+sizes must be positive integers. Horizons must be sorted, unique, and positive.
+Grid indices start at zero; `x` and `y` are cell-center coordinates in metres.
+Grid dimensions are rounded to cover the configured pitch.
 
-Tracking positions must be finite and non-null. A frame's ball columns and
-other frame-level metadata must be constant across its player rows. Do not mix
-coordinate origins, units, attacking directions, or grid configurations
-between inputs. SQmdb does not connect to a data source or infer how source
-columns should be interpreted; make those choices in your private adapter.
+### `SQConfig.from_metadata`
 
-### Streaming does not mean zero memory
+```python
+SQConfig.from_metadata(metadata, **overrides)
+```
 
-In this package, “streaming” means a result can be consumed in batches rather
-than immediately concatenated as one large output. `iter_player_influence`
-keeps tracking work grouped by frame and retains only a short velocity history,
-but each yielded frame batch still includes every player and grid cell selected
-for those frames. `iter_pitch_value` and `iter_defensive_influence_samples`
-also yield batches. Model fitting, `space_quality`, plotting one selected
-frame, and the non-iterator convenience functions produce eager results.
-Choose `frame_stride`, `grid_resolution_m`, and `batch_frames` with output
-volume and memory in mind.
+Use this class method when pitch dimensions are recorded alongside a tracking
+dataset, for example in metadata supplied by your data provider or in a local
+configuration file. Passing those values into SQmdb helps the pitch grid match
+the coordinate system of the data instead of silently relying on the
+105-by-68-metre defaults. The method reads only the canonical
+`pitch_length_m` and `pitch_width_m` keys; it does not inspect a tracking
+table or infer its dimensions.
 
-## Current modeling limitations
+| Argument | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `metadata` | Mapping with optional numeric `pitch_length_m` and `pitch_width_m` keys | Required | Dataset or provider metadata containing pitch dimensions in metres |
+| `**overrides` | `SQConfig` keyword settings | None | Explicit settings that replace metadata values or class defaults |
 
-The package implements practical approximations, not every detail of the
-referenced research method. Movement densities are smoothed histograms
-approximating KDEs; pitch value uses a scikit-learn neural network and does
-not reproduce the paper's dropout or Bayesian hyperparameter search. The
-README's [Method and scope](../README.md#method-and-scope) section describes
-these choices and additional caveats. A successful small data smoke test is
-not evidence that the models generalize to other teams, competitions, or
-seasons.
+Returns an `SQConfig`. Missing or `None` dimensions use class defaults;
+overrides take precedence. Invalid values or unknown setting names raise an
+error.
+
+### `SQConfig.grid`
+
+```python
+config.grid()
+```
+
+Takes no arguments. Returns a Polars DataFrame containing `grid_i`, `grid_j`,
+`x`, and `y` for every configured pitch cell.
+
+### `SQConfig.movement_lag_frames`
+
+This read-only property takes no arguments. Returns an integer: the nearest
+whole number of frames to `velocity_lag_seconds * frame_rate`, with a minimum
+of one frame.
+
+## Movement model and player influence
+
+### `fit_player_movement_model`
+
+```text
+fit_player_movement_model(tracking, config=SQConfig(), *, sample_stride=1)
+```
+
+| Argument | Type and unit | Default | Meaning |
+| --- | --- | --- | --- |
+| `tracking` | `pl.DataFrame` or `pl.LazyFrame` | Required | Historical player positions used to learn movement distributions |
+| `config` | `SQConfig` | `SQConfig()` | Frame rate, velocity lag, density, and horizon settings |
+| `sample_stride` | `int`, frames | `1` | Use every nth eligible frame when forming training trajectories |
+
+Returns a fitted `PlayerMovementModel`. Fitting is eager and may take
+substantial time on long histories. Trajectories are paired by exact frame
+IDs; missing frames do not create a training triplet. At least one usable
+movement distribution must be available, and sparse player/speed groups may
+use a pooled fallback. `sample_stride` must be positive.
+
+### `PlayerMovementModel`
+
+Use the fitted object returned by `fit_player_movement_model`; users normally
+do not construct it directly. Pass it to `iter_player_influence` or
+`player_influence`.
+
+| Property | Type and unit | Meaning |
+| --- | --- | --- |
+| `horizons` | `tuple[float, ...]`, seconds | Movement horizons represented in the fitted distributions |
+| `extent` | `float`, metres | Half-width of each stored density map |
+| `resolution` | `float`, metres | Cell width of each stored density map |
+
+The fitted distributions are stored in memory. Density values are smoothed
+histogram approximations and normalized relative to their map peak; they are
+not calibrated probabilities.
+
+### `iter_player_influence` and `player_influence`
+
+```text
+iter_player_influence(
+    tracking, model, config=SQConfig(), *, horizon_seconds=None,
+    horizon_model=None, frame_stride=None
+)
+player_influence(
+    tracking, model, config=SQConfig(), *, horizon_seconds=None,
+    horizon_model=None, frame_stride=None
+)
+```
+
+| Argument | Type and unit | Default | Meaning |
+| --- | --- | --- | --- |
+| `tracking` | `pl.DataFrame` or `pl.LazyFrame` | Required | Tracking rows for the frames to calculate |
+| `model` | `PlayerMovementModel` | Required | Fitted movement distributions |
+| `config` | `SQConfig` | `SQConfig()` | Pitch grid, frame rate, velocity lag, and batch settings |
+| `horizon_seconds` | `float` or `None`, seconds | `None` | Fixed movement horizon; if both horizon options are omitted, `1.0` second is used |
+| `horizon_model` | `PassHorizonModel` or `None` | `None` | Predict each player's horizon from their distance to the ball |
+| `frame_stride` | `int` or `None`, frames | `None` | Override `config.frame_stride` for output selection |
+
+`iter_player_influence` returns an iterator yielding Polars DataFrame batches.
+`player_influence` returns one eagerly concatenated Polars DataFrame. Each
+batch has `match_id`, `frame_id`, `player_id`, `team_id`, `grid_i`, `grid_j`,
+`x`, `y`, and `player_influence`; it contains whole selected frames and all
+players/grid cells for those frames.
+
+Choose at most one of `horizon_seconds` and `horizon_model`. A horizon model
+requires finite, frame-consistent `ball_x` and `ball_y` columns. The frame
+stride must be positive. Tracking rows must be grouped by match and ordered by
+frame. Prefer the iterator for large outputs.
+
+## Pass timing
+
+### `PassHorizonModel.fit`
+
+```python
+PassHorizonModel.fit(passes)
+```
+
+| Argument | Type and unit | Default | Meaning |
+| --- | --- | --- | --- |
+| `passes` | `pl.DataFrame` or `pl.LazyFrame` | Required | Completed passes with `pass_distance_m` (metres) and `pass_duration_seconds` (seconds) |
+
+Returns a fitted `PassHorizonModel`. Fitting is eager. At least 10 rows are
+required; distances must be finite and non-negative, durations finite and
+positive, and there must be at least two distinct distances.
+
+### `PassHorizonModel.predict`
+
+```python
+model.predict(pass_distance_m)
+```
+
+| Argument | Type and unit | Default | Meaning |
+| --- | --- | --- | --- |
+| `pass_distance_m` | `numpy.ndarray` or `float`, metres | Required | One or more non-negative pass distances |
+
+Returns a NumPy array of predicted pass durations in seconds. Values are
+clipped to the minimum and maximum durations seen during fitting. A scalar
+input produces a one-element array. Non-finite or negative distances raise
+`ValueError`.
+
+### `PassHorizonModel.min_seconds` and `PassHorizonModel.max_seconds`
+
+These read-only float properties take no arguments and return the shortest
+and longest pass durations, respectively, in the rows used to fit the model.
+
+## Pitch-value training labels and model
+
+### `iter_defensive_influence_samples` and `defensive_influence_samples`
+
+```text
+iter_defensive_influence_samples(player_surface_batches, tracking)
+defensive_influence_samples(player_surfaces, tracking)
+```
+
+| Argument | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `player_surface_batches` / `player_surfaces` | Iterable of `pl.DataFrame`, or a `pl.DataFrame` / `pl.LazyFrame` | Required | Player-influence batches for the iterator form, or one table/collection of batches for the eager form |
+| `tracking` | `pl.DataFrame` or `pl.LazyFrame` | Required | Matching tracking rows with ball position and `possession_team_id` |
+
+`iter_defensive_influence_samples` returns an iterator yielding Polars
+DataFrame label batches. `defensive_influence_samples` returns one
+concatenated Polars DataFrame.
+
+Tracking also needs the frame/player/team identity and position columns used
+by the relevant operations. Frame-level possession and ball values must be
+consistent. Each label row contains `match_id`, `frame_id`, `grid_i`,
+`grid_j`, `grid_x`, `grid_y`, `ball_x`, `ball_y`, and
+`defensive_influence`. The label is the summed influence of non-possessing
+players, capped at `1.0`; when `is_goalkeeper` is present, goalkeepers are
+excluded. Use the iterator for large histories.
+
+### `PitchValueModel.fit`
+
+```text
+PitchValueModel.fit(
+    samples, *, hidden_layer_sizes=(64, 64), random_state=0, max_iter=300,
+    max_training_samples=1_000_000
+)
+```
+
+| Argument | Type and unit | Default | Meaning |
+| --- | --- | --- | --- |
+| `samples` | `pl.DataFrame` or `pl.LazyFrame` | Required | Labels with `ball_x`, `ball_y`, `grid_x`, `grid_y`, and `defensive_influence` |
+| `hidden_layer_sizes` | `tuple[int, ...]`, units/layer | `(64, 64)` | Number of units in each neural-network hidden layer |
+| `random_state` | `int` | `0` | Seed for deterministic model initialization and sample selection |
+| `max_iter` | `int`, training iterations | `300` | Maximum optimizer iterations |
+| `max_training_samples` | `int`, rows | `1_000_000` | Upper bound on training rows; larger sets are deterministically subsampled |
+
+Returns a fitted `PitchValueModel`; training is eager. At least 10 finite
+training rows and target values in `[0, 1]` are required. The model uses a
+scikit-learn multilayer perceptron; it does not implement every training
+technique in the paper. Use `fit` rather than constructing the model
+directly; the constructor expects a fitted estimator.
+
+### `PitchValueModel.predict_defensive_influence`
+
+```python
+model.predict_defensive_influence(ball_x, ball_y, grid_x, grid_y)
+```
+
+| Argument | Type and unit | Default | Meaning |
+| --- | --- | --- | --- |
+| `ball_x`, `ball_y` | `numpy.ndarray`, metres | Required | Ball coordinates for each prediction |
+| `grid_x`, `grid_y` | `numpy.ndarray`, metres | Required | Pitch-grid coordinates paired with the ball coordinates |
+
+Returns a NumPy array of predicted defensive-influence values. The four input
+arrays must have the same number of rows; predictions are clipped to `[0, 1]`.
+
+### `iter_pitch_value` and `pitch_value`
+
+```text
+iter_pitch_value(tracking, model, config=SQConfig(), *, frame_stride=None)
+pitch_value(tracking, model, config=SQConfig(), *, frame_stride=None)
+```
+
+| Argument | Type and unit | Default | Meaning |
+| --- | --- | --- | --- |
+| `tracking` | `pl.DataFrame` or `pl.LazyFrame` | Required | Tracking with `ball_x` and `ball_y` consistent within each frame |
+| `model` | `PitchValueModel` | Required | Fitted pitch-value predictor |
+| `config` | `SQConfig` | `SQConfig()` | Pitch grid and output-batch settings |
+| `frame_stride` | `int` or `None`, frames | `None` | Override `config.frame_stride` |
+
+`iter_pitch_value` returns an iterator yielding Polars DataFrame batches.
+`pitch_value` returns one eagerly concatenated Polars DataFrame. Rows contain
+`match_id`, `frame_id`, `grid_i`, `grid_j`, `x`, `y`, and `pitch_value`.
+Pitch value combines predicted defensive influence with the package's
+distance-to-opponent-goal scaling; it is a model output, not a calibrated
+scoring probability.
+
+## Team control and space quality
+
+### `space_quality`
+
+```python
+space_quality(player_surfaces, pitch_values)
+```
+
+| Argument | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `player_surfaces` | `pl.DataFrame` or `pl.LazyFrame` | Required | Player-level influence rows with team, frame, grid, and `player_influence` |
+| `pitch_values` | `pl.DataFrame` or `pl.LazyFrame` | Required | Pitch-value rows with matching frame/grid keys and `pitch_value` |
+
+Returns a collected Polars DataFrame with one row per match, frame, team, and
+grid cell. `team_pitch_control` is `tanh(team influence - opponent
+influence)`; `space_quality` is `team_pitch_control * pitch_value`. The
+inputs must use compatible frame and grid keys. Original player-level
+influence remains available separately.
+
+## Visualization
+
+### `add_plot_velocities`
+
+```python
+add_plot_velocities(tracking, config=SQConfig())
+```
+
+| Argument | Type and unit | Default | Meaning |
+| --- | --- | --- | --- |
+| `tracking` | `pl.DataFrame` or `pl.LazyFrame` | Required | Tracking with frame/player IDs, player coordinates, and ball coordinates |
+| `config` | `SQConfig` | `SQConfig()` | Frame rate and velocity lag |
+
+Returns a Polars LazyFrame with `vx`, `vy`, `ball_vx`, and `ball_vy` in
+metres/second. It compares each position to the nearest whole-frame lag
+specified by the configuration. Positions without a matching lagged value
+(including the start of a match) receive zero velocity. Apply it to the full
+tracking sequence before filtering to plot frames.
+
+### `plot_pitch_surfaces`
+
+```text
+plot_pitch_surfaces(
+    pitch_control, pitch_value, space_quality, tracking, frame_id, *,
+    title=None, match_id=None, team_id=None, config=SQConfig(),
+    velocity_x="vx", velocity_y="vy", ball_velocity_x="ball_vx",
+    ball_velocity_y="ball_vy", velocity_arrow_seconds=1.5,
+    figsize=(10.0, 15.0), attacking_team_color="#D55E00",
+    defending_team_color="#0072B2", pitch_type="secondspectrum",
+    pitch_length=105.0, pitch_width=69.0, **pitch_kwargs
+)
+```
+
+| Argument | Type and unit | Default | Meaning |
+| --- | --- | --- | --- |
+| `pitch_control` | `pl.DataFrame` or `pl.LazyFrame` | Required | Team control surface for the selected frame |
+| `pitch_value` | `pl.DataFrame` or `pl.LazyFrame` | Required | Pitch-value surface for the selected frame |
+| `space_quality` | `pl.DataFrame` or `pl.LazyFrame` | Required | Space-quality surface for the selected frame |
+| `tracking` | `pl.DataFrame` or `pl.LazyFrame` | Required | Player positions and frame-consistent ball position for the selected frame |
+| `frame_id` | `int`, frame index | Required | Frame to render |
+| `title` | `str` or `None` | `None` | Optional chart title; otherwise a frame title is used |
+| `match_id` | Any value or `None` | `None` | Match selector when the frame ID is present in multiple matches |
+| `team_id` | Any value or `None` | `None` | Team treated as attacking in the signed color scale |
+| `config` | `SQConfig` | `SQConfig()` | Grid coordinates and pitch settings used by the surfaces |
+| `velocity_x`, `velocity_y` | Column names (`str`) | `"vx"`, `"vy"` | Player velocity columns |
+| `ball_velocity_x`, `ball_velocity_y` | Column names (`str`) | `"ball_vx"`, `"ball_vy"` | Ball velocity columns |
+| `velocity_arrow_seconds` | `float`, seconds | `1.5` | Forward projection duration for velocity arrows |
+| `figsize` | Pair of `float`, inches | `(10.0, 15.0)` | Matplotlib figure size |
+| `attacking_team_color` | Matplotlib-compatible color | `"#D55E00"` | Color for the selected attacking team and positive control |
+| `defending_team_color` | Matplotlib-compatible color | `"#0072B2"` | Color for the opponent and negative control |
+| `pitch_type` | `str` | `"secondspectrum"` | Pitch definition passed to mplsoccer |
+| `pitch_length`, `pitch_width` | `float`, metres | `105.0`, `69.0` | Pitch dimensions passed to mplsoccer |
+| `**pitch_kwargs` | Keyword arguments | None | Additional options forwarded to `mplsoccer.Pitch` |
+
+Returns a tuple `(figure, axes)` containing the Matplotlib figure and an array
+of axes ordered pitch control, pitch value, and space quality. All surfaces
+and tracking must contain the selected frame and compatible grid coordinates.
+Missing velocity columns produce a warning and omit the relevant arrows.
+Rendering requires `python -m pip install --upgrade "sqmdb[visualization]"`.
+
+## Modeling scope
+
+SQmdb's movement distributions are smoothed histogram approximations to KDEs;
+pitch-value fitting uses a scikit-learn neural network; and `space_quality`
+combines team control and pitch value. These functions implement useful
+components, not all analyses in the research paper. See the
+[pipeline walkthrough](api-flow.md) for a concise mapping to the paper's
+sections.
+
+## Reference
+
+Martens, F., Dick, U., & Brefeld, U. (2021). *Space and Control in Soccer*.
+Frontiers in Sports and Active Living, 3, 676179.
+[https://doi.org/10.3389/fspor.2021.676179](https://doi.org/10.3389/fspor.2021.676179)

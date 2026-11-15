@@ -300,7 +300,6 @@ def test_pitch_defaults_and_attacking_defending_colors():
     pytest.importorskip("matplotlib")
     pytest.importorskip("mplsoccer")
     import matplotlib
-    from matplotlib.offsetbox import AnnotationBbox, OffsetImage
     from matplotlib.collections import PathCollection
     from matplotlib.colors import to_rgba
 
@@ -329,18 +328,14 @@ def test_pitch_defaults_and_attacking_defending_colors():
         for collection in axes[0].collections
         if isinstance(collection, PathCollection)
     ]
-    assert len(player_and_ball) == 2
+    assert len(player_and_ball) == 3
     assert player_and_ball[0].get_facecolors()[0] == pytest.approx(to_rgba("#654321"))
     assert player_and_ball[1].get_facecolors()[0] == pytest.approx(to_rgba("#123456"))
-    ball_icons = [
-        artist for artist in axes[0].artists if isinstance(artist, AnnotationBbox)
-    ]
-    assert len(ball_icons) == 1
-    assert ball_icons[0].xy == (0.0, 0.5)
-    ball_image = ball_icons[0].offsetbox
-    assert isinstance(ball_image, OffsetImage)
-    assert ball_image.get_data().shape == (32, 32, 4)
-    assert ball_image.get_zoom() == pytest.approx(0.27)
+    ball_marker = player_and_ball[2]
+    np.testing.assert_array_equal(ball_marker.get_offsets(), [[0.0, 0.5]])
+    assert ball_marker.get_facecolors()[0] == pytest.approx(to_rgba("white"))
+    assert ball_marker.get_edgecolors()[0] == pytest.approx(to_rgba("black"))
+    assert ball_marker.get_sizes()[0] < player_and_ball[0].get_sizes()[0]
     control_mesh = next(
         collection
         for collection in axes[0].collections
@@ -488,7 +483,7 @@ def test_missing_ball_velocity_warns_and_omits_only_ball_arrow():
     pytest.importorskip("matplotlib")
     pytest.importorskip("mplsoccer")
     import matplotlib
-    from matplotlib.offsetbox import AnnotationBbox
+    from matplotlib.collections import PathCollection
     from matplotlib.quiver import Quiver
 
     matplotlib.use("Agg")
@@ -515,7 +510,15 @@ def test_missing_ball_velocity_warns_and_omits_only_ball_arrow():
     fig.canvas.draw()
     arrows = [collection for collection in axes[0].collections if isinstance(collection, Quiver)]
     assert len(arrows) == 2
-    assert len([artist for artist in axes[0].artists if isinstance(artist, AnnotationBbox)]) == 1
+    ball_markers = [
+        collection
+        for collection in axes[0].collections
+        if isinstance(collection, PathCollection)
+        and collection.get_offsets().shape == (1, 2)
+        and collection.get_facecolors()[0] == pytest.approx((1.0, 1.0, 1.0, 1.0))
+    ]
+    assert len(ball_markers) == 1
+    np.testing.assert_array_equal(ball_markers[0].get_offsets(), [[0.0, 0.5]])
     plt.close(fig)
 
 

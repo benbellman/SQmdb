@@ -1,1 +1,1 @@
-"""Examples and optional local-validation helpers for SQmdb."""
+"""Runnable example modules for SQmdb."""
